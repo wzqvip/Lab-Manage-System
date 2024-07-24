@@ -2,12 +2,12 @@ import sys
 import serial
 import serial.tools.list_ports
 import time
+import csv
 from PyQt5.QtWidgets import (
     QApplication,
     QWidget,
     QPushButton,
     QVBoxLayout,
-    QHBoxLayout,
     QComboBox,
     QLabel,
     QLineEdit,
@@ -65,8 +65,9 @@ class FingerprintManager(QWidget):
         super().__init__()
 
         self.ser = ser
-        self.initUI()
         self.users = {}  # 存储用户名和指纹ID的映射
+        self.load_users()
+        self.initUI()
 
     def initUI(self):
         self.setWindowTitle("指纹管理系统")
@@ -111,6 +112,8 @@ class FingerprintManager(QWidget):
 
         self.setLayout(main_layout)
 
+        self.update_user_list()
+
     def update_debug_text(self, message):
         self.debug_text.append(message)
 
@@ -118,6 +121,10 @@ class FingerprintManager(QWidget):
         username = self.name_input.text()
         if not username:
             QMessageBox.warning(self, "错误", "请输入用户名")
+            return
+
+        if username in self.users:
+            QMessageBox.warning(self, "错误", "用户名已存在")
             return
 
         # 为用户分配一个新的指纹ID
@@ -140,25 +147,22 @@ class FingerprintManager(QWidget):
                 QMessageBox.information(self, "提示", "请再次按下手指")
             elif response == "fp_enroll_ok":
                 self.users[username] = new_id
-                self.user_list.addItem(f"{username}: {new_id}")
+                self.save_users()
+                self.update_user_list()
                 QMessageBox.information(self, "成功", "指纹注册成功")
                 break
-
-            elif response.endswith("Image taken") or response.endswith(
-                "Image converted"
-            ):
+            elif response.endswith("Image taken") or response.endswith("Image converted"):
                 self.update_debug_text(f"Received: {response}")
-            elif (
-                response == "fp_enroll_fail"
-                or response == "Communication error"
-                or response == "Imaging error"
-                or response == "Unknown error"
-                or response == "Image too messy"
-                or response == "Could not find fingerprint features"
-                or response == "Error writing to flash"
-                or response == "Could not store in that location"
-            ):
-
+            elif response in [
+                "fp_enroll_fail",
+                "Communication error",
+                "Imaging error",
+                "Unknown error",
+                "Image too messy",
+                "Could not find fingerprint features",
+                "Error writing to flash",
+                "Could not store in that location",
+            ]:
                 QMessageBox.warning(self, "错误", "指纹注册失败")
                 self.update_debug_text(f"Error: {response}")
                 break
@@ -184,7 +188,8 @@ class FingerprintManager(QWidget):
                 self.update_debug_text(f"Received: {response}")
                 if response == "fp_delete_ok":
                     del self.users[username]
-                    self.user_list.takeItem(self.user_list.row(selected_item))
+                    self.save_users()
+                    self.update_user_list()
                     QMessageBox.information(self, "成功", "用户删除成功")
                     break
                 else:
@@ -202,22 +207,33 @@ class FingerprintManager(QWidget):
                 self.update_debug_text(f"Received: {response}")
                 if response.startswith("fp_detect_ok"):
                     fingerprint_id = response.split(" ")[1]
-                    username = next(
-                        (
-                            u
-                            for u, fid in self.users.items()
-                            if str(fid) == fingerprint_id
-                        ),
-                        "未知用户",
-                    )
-                    self.user_info_label.setText(
-                        f"当前登录: {username} (ID: {fingerprint_id})"
-                    )
+                    username = next((u for u, fid in self.users.items() if str(fid) == fingerprint_id), "未知用户")
+                    self.user_info_label.setText(f"当前登录: {username} (ID: {fingerprint_id})")
                     break
                 else:
                     self.user_info_label.setText("指纹验证失败")
                     QMessageBox.warning(self, "错误", "指纹验证失败")
                     break
+
+    def load_users(self):
+        try:
+            with open("users.csv", mode="r", newline="") as file:
+                reader = csv.reader(file)
+                self.users = {rows[0]: int(rows[1]) for rows in reader}
+        except FileNotFoundError:
+            with open("users.csv", mode="w", newline="") as file:
+                pass  # 创建文件
+
+    def save_users(self):
+        with open("users.csv", mode="w", newline="") as file:
+            writer = csv.writer(file)
+            for username, fingerprint_id in self.users.items():
+                writer.writerow([username, fingerprint_id])
+
+    def update_user_list(self):
+        self.user_list.clear()
+        for username, fingerprint_id in self.users.items():
+            self.user_list.addItem(f"{username}: {fingerprint_id}")
 
 
 if __name__ == "__main__":
